@@ -1,0 +1,109 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — Personal Assistant Bot
+#
+# Triggers on every push to `main`.
+# Steps:
+#   1. Lint (flake8) — catch syntax errors before deploy
+#   2. Deploy to EC2 — SSH in, pull latest code, install deps, restart service
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   EC2_HOST          — your EC2 public IP or hostname
+#   EC2_USER          — SSH username (usually "ubuntu")
+#   EC2_SSH_KEY       — full contents of your EC2 private key (.pem file)
+#   EC2_PROJECT_PATH  — absolute path on EC2, e.g. /home/ubuntu/personal-assistant
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Deploy Personal Assistant
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+jobs:
+
+  # ── Step 1: Lint ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (flake8)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Run flake8
+        run: |
+          flake8 . \
+            --exclude=venv,.git,__pycache__ \
+            --max-line-length=120 \
+            --ignore=E501,W503,E203
+
+  # ── Step 2: Deploy to EC2 ────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: lint     # only deploy if lint passes
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 host to known_hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        # Env vars are available to the runner shell; the heredoc is UNQUOTED
+        # so the runner expands $EC2_HOST, $EC2_USER, $EC2_PROJECT_PATH before
+        # the SSH command is sent. Single-quoting ENDSSH would suppress expansion.
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_PROJECT_PATH: ${{ secrets.EC2_PROJECT_PATH }}
+        run: |
+          ssh "$EC2_USER@$EC2_HOST" << ENDSSH
+            set -e
+
+            echo "=== Pulling latest code ==="
+            cd "$EC2_PROJECT_PATH"
+            git pull origin main
+
+            echo "=== Activating virtualenv ==="
+            source venv/bin/activate
+
+            echo "=== Installing / upgrading dependencies ==="
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            echo "=== Ensuring data directories exist ==="
+            mkdir -p data/tmp
+
+            echo "=== Restarting systemd service ==="
+            sudo systemctl restart personal-assistant
+
+            echo "=== Verifying service is active ==="
+            sudo systemctl is-active personal-assistant \
+              && echo "✅ Bot is running." \
+              || { echo "❌ Bot failed to start."; exit 1; }
+          ENDSSH
+
+      - name: Notify success
+        if: success()
+        run: echo "✅ Deployment to EC2 complete."
+
+      - name: Notify failure
+        if: failure()
+        run: echo "❌ Deployment failed. Check the logs above."

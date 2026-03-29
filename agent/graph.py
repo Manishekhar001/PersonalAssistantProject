@@ -31,11 +31,12 @@ from agent.tools import (
     add_expense,
     get_expenses,
     set_reminder,
+    summarize_url,
 )
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = f"""You are a personal assistant. Today is {{date}}.
+SYSTEM_PROMPT = """You are a personal assistant. Today is {date}.
 
 You help with:
 - General questions (answer from knowledge, use web_search for current/unknown info)
@@ -45,6 +46,8 @@ You help with:
 - Tasks: create_task, get_tasks (stored in Notion)
 - Calendar: create_event, get_events (stored in Notion)
 - Expenses: add_expense, get_expenses (stored locally)
+- Reminders: set_reminder (stored locally, triggers after X minutes)
+- URL Summaries: summarize_url (fetch and summarise any webpage in 5 bullet points)
 
 Rules:
 - Be concise. No fluff.
@@ -70,13 +73,14 @@ def create_assistant():
     Creates and returns the LangGraph ReAct agent.
 
     - LLM: Groq (llama-3.3-70b-versatile) — fast and free
-    - Tools: all 11 tools defined in tools.py
+    - Tools: 14 tools covering search, weather, Gmail, Notion, expenses,
+             reminders, URL summarisation
     - Memory: MemorySaver keeps conversation history per user (thread_id)
     """
     llm = ChatGroq(
         model="llama-3.3-70b-versatile",
         api_key=config.GROQ_API_KEY,
-        temperature=0,          # deterministic — better for assistant tasks
+        temperature=0,      # deterministic — better for assistant tasks
         max_tokens=1024,
     )
 
@@ -93,9 +97,11 @@ def create_assistant():
         get_events,
         add_expense,
         get_expenses,
+        set_reminder,       # was imported but missing from the list — fixed
+        summarize_url,
     ]
 
-    memory = MemorySaver()  # In-process memory; survives restarts only in RAM
+    memory = MemorySaver()  # In-process memory; resets on restart
 
     agent = create_react_agent(
         model=llm,

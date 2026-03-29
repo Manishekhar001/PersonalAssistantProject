@@ -1,9 +1,35 @@
-python-telegram-bot==21.3
+# ── Core bot framework ────────────────────────────────────────────────────────
+python-telegram-bot[job-queue]==21.3
+
+# ── LangChain / LangGraph agent stack ────────────────────────────────────────
 langchain-groq==0.1.9
 langchain==0.2.14
 langchain-core==0.2.33
 langgraph==0.2.14
+
+# ── Groq SDK — used directly for Whisper transcription & summarize_url LLM ───
+groq>=0.9.0
+
+# ── Notion ────────────────────────────────────────────────────────────────────
 notion-client==2.2.1
+
+# ── Web search (agent tool) ───────────────────────────────────────────────────
 google-search-results==2.4.2
+
+# ── HTTP + HTML parsing (summarize_url tool & NewsAPI fetcher) ────────────────
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# ── Voice message processing ──────────────────────────────────────────────────
+pydub>=0.25.1
+# ffmpeg must also be installed on the system:
+#   Ubuntu/EC2:  sudo apt-get install -y ffmpeg
+#   macOS:       brew install ffmpeg
+#   Windows:     https://ffmpeg.org/download.html  (add to PATH)
+
+# ── Scheduling & timezones ────────────────────────────────────────────────────
+pytz>=2024.1
+
+# ── Environment & utilities ───────────────────────────────────────────────────
 python-dotenv==1.0.1
 numpy>=1.26.0,<2.0.0

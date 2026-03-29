@@ -11,30 +11,31 @@ echo " Personal Assistant — EC2 Setup"
 echo "======================================"
 
 # 1. Update system packages
-echo "[1/7] Updating system..."
+echo "[1/8] Updating system..."
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
-# 2. Install Python 3.11 and pip
-echo "[2/7] Installing Python 3.11..."
-sudo apt-get install -y python3.11 python3.11-venv python3-pip git
+# 2. Install Python 3.11, pip, ffmpeg (required by pydub for voice messages)
+echo "[2/8] Installing Python 3.11 and system deps..."
+sudo apt-get install -y python3.11 python3.11-venv python3-pip git ffmpeg
 
 # 3. Create virtual environment
-echo "[3/7] Creating virtual environment..."
+echo "[3/8] Creating virtual environment..."
 cd ~/personal-assistant
 python3.11 -m venv venv
 source venv/bin/activate
 
 # 4. Install dependencies
-echo "[4/7] Installing Python packages..."
+echo "[4/8] Installing Python packages..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 5. Create data directory for SQLite
-echo "[5/7] Creating data directory..."
-mkdir -p data
+# 5. Create data directories for SQLite + voice tmp files
+echo "[5/8] Creating data directories..."
+mkdir -p data/tmp
 
 # 6. Create .env from example if it doesn't exist
+echo "[6/8] Checking .env..."
 if [ ! -f .env ]; then
     cp .env.example .env
     echo ""
@@ -45,7 +46,7 @@ if [ ! -f .env ]; then
 fi
 
 # 7. Create a systemd service so the bot runs automatically and restarts on crash
-echo "[6/7] Creating systemd service..."
+echo "[7/8] Creating systemd service..."
 sudo bash -c "cat > /etc/systemd/system/personal-assistant.service << EOF
 [Unit]
 Description=Personal Assistant Telegram Bot
@@ -69,7 +70,7 @@ EOF"
 sudo systemctl daemon-reload
 sudo systemctl enable personal-assistant
 
-echo "[7/7] Done!"
+echo "[8/8] Done!"
 echo ""
 echo "======================================"
 echo " Next steps:"
@@ -90,4 +91,17 @@ echo ""
 echo "5. Restart after changes:"
 echo "   sudo systemctl restart personal-assistant"
 echo ""
+echo "======================================"
+echo " GitHub Actions CI/CD:"
+echo "======================================"
+echo ""
+echo "Add these secrets to your GitHub repo"
+echo "(Settings → Secrets → Actions):"
+echo ""
+echo "  EC2_HOST          = $(curl -s http://checkip.amazonaws.com)"
+echo "  EC2_USER          = $USER"
+echo "  EC2_SSH_KEY       = <contents of your .pem file>"
+echo "  EC2_PROJECT_PATH  = $(pwd)"
+echo ""
+echo "After that, every push to main auto-deploys. ✅"
 echo "======================================"

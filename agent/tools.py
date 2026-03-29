@@ -12,6 +12,9 @@ from email.header import decode_header
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 
+import requests
+from bs4 import BeautifulSoup
+from groq import Groq
 from langchain_core.tools import tool
 from serpapi import GoogleSearch
 from notion_client import Client
@@ -20,6 +23,9 @@ import config
 
 # ── Notion client (shared across Notion tools) ────────────────────────────────
 notion = Client(auth=config.NOTION_API_KEY) if config.NOTION_API_KEY else None
+
+# ── Groq client (used directly for summarize_url) ─────────────────────────────
+_groq = Groq(api_key=config.GROQ_API_KEY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +75,76 @@ def get_weather(city: str = "Hyderabad") -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. GMAIL — READ
+# 3. URL SUMMARIZER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@tool
+def summarize_url(url: str) -> str:
+    """
+    Fetch a webpage and summarize its main content in 5 bullet points.
+    url: the full URL of the webpage to summarize (must start with http)
+    """
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Remove boilerplate tags
+        for tag in soup(["nav", "footer", "header", "aside", "script", "style",
+                          "noscript", "form", "button", "iframe", "figure"]):
+            tag.decompose()
+
+        # Prefer <article> or <main>, fall back to <body>
+        content_node = soup.find("article") or soup.find("main") or soup.body
+        if not content_node:
+            return "Could not extract content from this page."
+
+        raw_text = content_node.get_text(separator="\n", strip=True)
+
+        # Trim to ~6000 characters to stay within token limits
+        raw_text = raw_text[:6000]
+
+        if not raw_text.strip():
+            return "The page appears to have no readable text content."
+
+        response = _groq.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            max_tokens=512,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a concise research assistant. "
+                        "Given article text, return EXACTLY 5 bullet points summarising the key information. "
+                        "Each bullet starts with '• '. No preamble, no extra text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize this article in 5 bullet points:\n\n{raw_text}",
+                },
+            ],
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except requests.exceptions.RequestException as e:
+        return f"Could not fetch the URL: {str(e)}"
+    except Exception as e:
+        return f"summarize_url failed: {str(e)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. GMAIL — READ
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -124,7 +199,7 @@ def read_emails(limit: int = 5) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. GMAIL — SEND
+# 5. GMAIL — SEND
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -153,7 +228,7 @@ def send_email(to: str, subject: str, body: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. NOTION — NOTES
+# 6. NOTION — NOTES
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -207,7 +282,7 @@ def get_notes() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. NOTION — TASKS
+# 7. NOTION — TASKS
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -268,7 +343,7 @@ def get_tasks() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. NOTION — CALENDAR
+# 8. NOTION — CALENDAR
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -340,7 +415,7 @@ def get_events(start_date: str = "", end_date: str = "") -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. REMINDERS (SQLite — local)
+# 9. REMINDERS (SQLite — local)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
@@ -395,7 +470,7 @@ def mark_reminder_sent(reminder_id: int) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. EXPENSES (SQLite — local)
+# 10. EXPENSES (SQLite — local)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -449,6 +524,7 @@ def init_db():
     """Create the expenses and reminders tables. Called once at startup."""
     import os
     os.makedirs("data", exist_ok=True)
+    os.makedirs("data/tmp", exist_ok=True)
     conn = sqlite3.connect(config.DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
